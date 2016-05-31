@@ -1,12 +1,13 @@
 import argparse
 import config
 import requests
+import json
 
 moztrap_base_url = config.moztrap_url
 testrail_base_url = config.testrail_url
 
-class TestCaseEntry(object):
 
+class TestCaseEntry(object):
     def __init__(self, name, steps):
         self.name = name
         self.steps = steps
@@ -16,7 +17,7 @@ class TestCaseEntry(object):
 
 
 def get_moztrap_test_cases(test_suite_id):
-    result = requests.get("{base}/api/v1/caseversion".format(base=moztrap_base_url), params = {
+    result = requests.get("{base}/api/v1/caseversion".format(base=moztrap_base_url), params={
         "format": "json",
         "case__suites": test_suite_id
     })
@@ -30,20 +31,20 @@ def get_moztrap_test_cases(test_suite_id):
 
 def get_moztrap_test_case_details(test_case_id):
     result = requests.get("{base}/api/v1/caseversion/{id}".format(base=moztrap_base_url, id=test_case_id),
-        params={
-        "format": "json"
-        }
-    )
+                          params={
+                              "format": "json"
+                          }
+                          )
     result_json = result.json()
     steps = []
     for step in result_json["steps"]:
         # append a tuple of (instruction, expected)
         steps.append((step["instruction"], step["expected"]))
 
+    print("Found test steps: " + str(steps))
     testcase_details = TestCaseEntry(result_json["name"], steps)
+
     return testcase_details
-
-
 
 
 def add_testcase_to_testrail(testrail_section_id, testcase_data):
@@ -51,22 +52,37 @@ def add_testcase_to_testrail(testrail_section_id, testcase_data):
 
     processed_steps = process_steps(testcase_data.steps)
 
-    result = requests.post("{base}/api/v2/add_case/{section}".format(base=config.testrail_url, section=testrail_section_id),
-                           data={
-                               "title": testcase_data.name,
-                               "type_id": 1,
-                               "priority_id": 3,
-                               "estimate":"",
-                               "refs":"",
-                               "custom_steps_separated":processed_steps
-                           },
-                           auth=(config.testrail_user, config.testrail_api_key)
-                           )
-    if(result.status_code == 200):
+    url = "{base}/api/v2/add_case/{section}".format(base=config.testrail_url, section=testrail_section_id)
+    data = {
+        "title": testcase_data.name,
+        "type_id": 1,
+        "template_id": 2,
+        "priority_id": 3,
+        "estimate": "",
+        "refs": "",
+        "custom_steps_separated": processed_steps
+    }
+
+    print("posting test case to " + url)
+
+    formatted_data = json.dumps(data)
+    print("with data: " + formatted_data)
+    result = requests.post(
+        url,
+        data=formatted_data,
+        auth=(config.testrail_user, config.testrail_api_key),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "*/*"
+        }
+    )
+
+    if (result.status_code == 200):
         print("Successfully imported: {0}".format(testcase_data.name))
     else:
+        print
+        result.content
         raise RuntimeError("Failed to import test case {0}".format(testcase_data.name))
-
 
 
 def process_steps(steps):
@@ -76,6 +92,7 @@ def process_steps(steps):
             "content": step[0],
             "expected": step[1]
         })
+    return processed_steps
 
 
 """
@@ -89,7 +106,6 @@ if __name__ == '__main__':
 
     print("Getting test cases for {0}...".format(args.mzid))
     testcases = get_moztrap_test_cases(args.mzid)
-
 
     for testcase in testcases:
         testcase_details = get_moztrap_test_case_details(testcase)
